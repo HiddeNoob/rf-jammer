@@ -1,6 +1,0 @@
--mlongcalls
--fno-builtin-memcpy
--fno-builtin-memset
--fno-builtin-bzero
-"-specs=/Users/hiddenoob/Desktop/Cloud/code/esp32-s3/esp-jammer/build/specs/picolibc.specs"
--fno-rtti

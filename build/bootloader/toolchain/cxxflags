@@ -1,6 +1,0 @@
-"-specs=/Users/hiddenoob/Desktop/Cloud/code/esp32-s3/esp-jammer/build/bootloader/specs/picolibc.specs"
--mlongcalls
--fno-builtin-memcpy
--fno-builtin-memset
--fno-builtin-bzero
--fno-rtti
