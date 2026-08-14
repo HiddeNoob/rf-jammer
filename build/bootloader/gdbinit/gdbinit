@@ -1,0 +1,2 @@
+source /Users/hiddenoob/Desktop/Cloud/code/esp32-s3/esp-jammer/build/bootloader/gdbinit/symbols
+source /Users/hiddenoob/Desktop/Cloud/code/esp32-s3/esp-jammer/build/bootloader/gdbinit/connect

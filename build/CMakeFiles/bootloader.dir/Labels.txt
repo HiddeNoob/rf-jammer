@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+/Users/hiddenoob/Desktop/Cloud/code/esp32-s3/esp-jammer/build/CMakeFiles/bootloader
+/Users/hiddenoob/Desktop/Cloud/code/esp32-s3/esp-jammer/build/CMakeFiles/bootloader.rule
+/Users/hiddenoob/Desktop/Cloud/code/esp32-s3/esp-jammer/build/CMakeFiles/bootloader-complete.rule
+/Users/hiddenoob/Desktop/Cloud/code/esp32-s3/esp-jammer/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+/Users/hiddenoob/Desktop/Cloud/code/esp32-s3/esp-jammer/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+/Users/hiddenoob/Desktop/Cloud/code/esp32-s3/esp-jammer/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+/Users/hiddenoob/Desktop/Cloud/code/esp32-s3/esp-jammer/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+/Users/hiddenoob/Desktop/Cloud/code/esp32-s3/esp-jammer/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+/Users/hiddenoob/Desktop/Cloud/code/esp32-s3/esp-jammer/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+/Users/hiddenoob/Desktop/Cloud/code/esp32-s3/esp-jammer/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule

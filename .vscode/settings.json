@@ -1,0 +1,20 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.extensionActivationMode": "always",
+  "idf.openOcdConfigs": [
+    "board/esp32s3-builtin.cfg"
+  ],
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32s3"
+  },
+  "clangd.path": "/Users/hiddenoob/.espressif/tools/esp-clang/esp-20.1.1_20250829/esp-clang/bin/clangd",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=/Users/hiddenoob/Desktop/Cloud/code/esp32-s3/ESP-IDF/build"
+  ],
+  "idf.flashType": "UART",
+  "idf.port": "/dev/tty.usbmodem1101",
+  "idf.currentSetup": "/Users/hiddenoob/.espressif/v6.0.2/esp-idf",
+  "idf.monitorPort": "/dev/tty.usbmodem1101"
+}
