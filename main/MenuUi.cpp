@@ -100,6 +100,9 @@ void MenuUi::run() {
 
 void MenuUi::initializeMenu() {
     ESP_LOGI(TAG, "Adding menu items.");
+    menuStack.clear();
+    menuStack.push_back(&mainPage);
+
     mainPage.addMenuItem(createTaskItem);
     mainPage.addMenuItem(runningTasksItem);
     mainPage.addMenuItem(taskHistoryItem);
@@ -108,6 +111,7 @@ void MenuUi::initializeMenu() {
     buildCreateTaskPage();
     buildRunningTasksPage();
     buildHistoryPage();
+    historyBuilt = true;
 
     moduleItems.reserve(sweeper.getModuleCount());
     moduleStatusTitles.resize(sweeper.getModuleCount());
@@ -123,6 +127,35 @@ void MenuUi::initializeMenu() {
     menu.setMenuPageCurrent(mainPage);
     menu.init();
     menu.drawMenu();
+}
+
+void MenuUi::pushMenuPage(GEMPage* page) {
+    if (page == nullptr) {
+        return;
+    }
+
+    if (!menuStack.empty() && menuStack.back() == page) {
+        return;
+    }
+
+    menuStack.push_back(page);
+    menu.setMenuPageCurrent(*page);
+    menu.drawMenu();
+}
+
+void MenuUi::popMenuPage() {
+    if (menuStack.size() <= 1) {
+        return;
+    }
+
+    menuStack.pop_back();
+    menu.setMenuPageCurrent(*menuStack.back());
+    menu.drawMenu();
+}
+
+void MenuUi::clearTaskOverlay() {
+    selectedTaskForEdit = nullptr;
+    display.clearBuffer();
 }
 
 void MenuUi::updateModuleStatusItems() {
@@ -163,8 +196,7 @@ void MenuUi::chooseTask(GEMCallbackData data) {
     }
     activeUi->updateModuleStatusItems();
     activeUi->display.clearBuffer();
-    activeUi->menu.setMenuPageCurrent(activeUi->moduleStatusPage);
-    activeUi->menu.drawMenu();
+    activeUi->pushMenuPage(&activeUi->moduleStatusPage);
 }
 
 void MenuUi::showRunningTaskStatus(GEMCallbackData data) {
@@ -178,18 +210,16 @@ void MenuUi::showRunningTaskStatus(GEMCallbackData data) {
 
     activeUi->selectedTaskForEdit = activeUi->runningTasks[data.valInt];
     activeUi->display.clearBuffer();
-    activeUi->menu.setMenuPageCurrent(activeUi->mainPage);
-    activeUi->menu.drawMenu();
+    activeUi->pushMenuPage(&activeUi->mainPage);
     activeUi->drawTaskStatusSection();
 }
 
 void MenuUi::showRfStatus() {
     if (activeUi != nullptr) {
-        activeUi->selectedTaskForEdit = nullptr;
+        activeUi->clearTaskOverlay();
         activeUi->updateModuleStatusItems();
         activeUi->display.clearBuffer();
-        activeUi->menu.setMenuPageCurrent(activeUi->moduleStatusPage);
-        activeUi->menu.drawMenu();
+        activeUi->pushMenuPage(&activeUi->moduleStatusPage);
         ESP_LOGI(TAG, "RF module status displayed.");
     }
 }
@@ -251,8 +281,11 @@ void MenuUi::confirmSelectedTask() {
         activeUi->selectedModules.assign(activeUi->sweeper.getModuleCount(), false);
         activeUi->updateModuleStatusItems();
         activeUi->display.clearBuffer();
+        activeUi->menuStack.clear();
+        activeUi->menuStack.push_back(&activeUi->mainPage);
         activeUi->menu.setMenuPageCurrent(activeUi->mainPage);
         activeUi->menu.drawMenu();
+        activeUi->buildHistoryPage();
     }
 }
 
@@ -283,7 +316,7 @@ void MenuUi::drawTaskStatusSection() {
         return;
     }
 
-    if (activeUi->menu.getCurrentMenuPage() != &activeUi->mainPage) {
+    if (activeUi->menuStack.empty() || activeUi->menuStack.back() != &activeUi->mainPage) {
         return;
     }
 
@@ -367,7 +400,31 @@ void MenuUi::buildRunningTasksPage() {
 }
 
 void MenuUi::buildHistoryPage() {
-    (void)taskHistoryPage;
+    if (historyBuilt) {
+        return;
+    }
+
+    historyItems.clear();
+    if (taskHistory != nullptr) {
+        const auto& entries = taskHistory->entries();
+        if (entries.empty()) {
+            historyItems.push_back(std::make_unique<GEMItem>("No task history", []() {}));
+            taskHistoryPage.addMenuItem(*historyItems.back());
+            return;
+        }
+
+        for (size_t index = 0; index < entries.size() && index < 8; ++index) {
+            const auto& entry = entries[entries.size() - 1 - index];
+            char title[32];
+            snprintf(title, sizeof(title), "%s %s",
+                     entry.taskName.c_str(),
+                     entry.status == TaskStatus::RUNNING ? "RUN" :
+                     entry.status == TaskStatus::FAILED ? "FAIL" :
+                     entry.status == TaskStatus::SUCCEEDED ? "OK" : "IDLE");
+            historyItems.push_back(std::make_unique<GEMItem>(title, []() {}));
+            taskHistoryPage.addMenuItem(*historyItems.back());
+        }
+    }
 }
 
 void MenuUi::addTask(std::shared_ptr<Task> task) {

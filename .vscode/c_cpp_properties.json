@@ -6,15 +6,16 @@
             "compileCommands": [
                 "${config:idf.buildPath}/compile_commands.json"
             ],
-            "intelliSenseMode": "gcc-x86",
+            "intelliSenseMode": "linux-gcc-arm",
             "includePath": [
                 "${workspaceFolder}/**",
-                "/Users/hiddenoob/.espressif/v6.0.2/esp-idf/components/**/**/",
-                "/Users/hiddenoob/.espressif/v6.0.2/esp-idf/components/freertos/FreeRTOS-Kernel-SMP/portable/linux/include/freertos"
+                "/Users/hiddenoob/.espressif/v6.0.2/esp-idf/components/**",
+                "/Users/hiddenoob/.espressif/v6.0.2/esp-idf/components/freertos/FreeRTOS-Kernel-SMP/portable/linux/include/freertos/**"
             ],
             "browse": {
                 "path": [
-                    "${workspaceFolder}"
+                    "${workspaceFolder}",
+                    "/Users/hiddenoob/.espressif/v6.0.2/esp-idf/components"
                 ],
                 "limitSymbolsToIncludedHeaders": true
             }

@@ -34,6 +34,9 @@ private:
     void initializeMenu();
     void updateModuleStatusItems();
     void handleButtons();
+    void pushMenuPage(GEMPage* page);
+    void popMenuPage();
+    void clearTaskOverlay();
     void drawTaskStatusSection();
     void drawTaskHistorySection();
     void renderTaskStatusForCurrentSelection();
@@ -50,8 +53,10 @@ private:
     std::vector<std::shared_ptr<Task>> selectedTasks;
     std::vector<std::unique_ptr<GEMItem>> taskItems;
     std::vector<std::unique_ptr<GEMItem>> runningTaskItems;
+    std::vector<std::unique_ptr<GEMItem>> historyItems;
     std::vector<std::unique_ptr<GEMItem>> moduleItems;
     std::vector<std::array<char, 50>> moduleStatusTitles;
+    std::vector<GEMPage*> menuStack;
     std::vector<bool> selectedModules;
     std::shared_ptr<Task> selectedTaskForEdit;
     U8G2_SSD1306_128X64_NONAME_F_HW_I2C display;
@@ -61,6 +66,7 @@ private:
     GEMPage taskHistoryPage;
     GEMPage rfModulesPage;
     GEMPage moduleStatusPage;
+    bool historyBuilt = false;
     GEMItem createTaskItem;
     GEMItem runningTasksItem;
     GEMItem taskHistoryItem;
