@@ -1,7 +1,7 @@
 idf_component_register(
-    SRCS "main.cpp" "EspHal.cpp" "RfSweeper.cpp" "MenuUi.cpp" "tasks/Task.cpp"
+    SRCS "main.cpp" "EspHal.cpp" "RfSweeper.cpp" "MenuUi.cpp" "WifiScanner.cpp" "tasks/Task.cpp"
     INCLUDE_DIRS "."
-    REQUIRES jgromes__radiolib esp_timer driver esp_driver_gpio esp_driver_spi arduino u8g2 GEM
+    REQUIRES jgromes__radiolib esp_timer nvs_flash esp_wifi esp_netif esp_event driver esp_driver_gpio esp_driver_spi arduino u8g2 GEM
 )
 
 # Derleyicinin bu uyarıları hata olarak işlemesini engeller

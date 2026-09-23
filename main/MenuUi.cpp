@@ -18,14 +18,6 @@ constexpr gpio_num_t BTN_DOWN_PIN = GPIO_NUM_17;
 constexpr gpio_num_t BTN_SELECT_PIN = GPIO_NUM_18;
 constexpr uint8_t OLED_ADDRESS_PRIMARY = 0x3C;
 constexpr uint8_t OLED_ADDRESS_ALTERNATE = 0x3D;
-
-std::vector<int> defaultRFSelection(int moduleCount) {
-    std::vector<int> ids;
-    for (int i = 0; i < moduleCount; ++i) {
-        ids.push_back(i);
-    }
-    return ids;
-}
 }
 
 MenuUi* MenuUi::activeUi = nullptr;
@@ -43,6 +35,7 @@ MenuUi::MenuUi(RfSweeper& sweeper, TaskRegistry* registry, TaskHistory* history)
             taskHistoryPage("Task History", mainPage),
             rfModulesPage("RF Modules", createTaskPage),
             moduleStatusPage("RF Status", rfModulesPage),
+            wifiScanPage("WiFi Networks", createTaskPage),
             createTaskItem("Create Task", createTaskPage),
             runningTasksItem("Current Running Tasks", runningTasksPage),
             taskPauseItem("Pause Task", toggleTaskPause),
@@ -53,6 +46,7 @@ MenuUi::MenuUi(RfSweeper& sweeper, TaskRegistry* registry, TaskHistory* history)
             statusItem("Current Status", showRfStatus),
             confirmTaskItem("Confirm RF Selection", confirmSelectedTask),
             infoItem("System Information", showInfo),
+            wifiScanConfirmItem("Confirm Channels", confirmWifiChannels),
       menu(display, GEM_POINTER_ROW, GEM_ITEMS_COUNT_AUTO) {
     if (taskRegistry == nullptr) {
         static TaskRegistry defaultRegistry;
@@ -66,6 +60,7 @@ MenuUi::MenuUi(RfSweeper& sweeper, TaskRegistry* registry, TaskHistory* history)
     taskRegistry->addTask(std::make_shared<BluetoothSweepTask>(sweeper));
     taskRegistry->addTask(std::make_shared<AllChannelsSweepTask>(sweeper));
     taskRegistry->addTask(std::make_shared<HistogramGraphTask>(sweeper));
+    taskRegistry->addTask(std::make_shared<WifiJamTask>(sweeper));
 }
 
 void MenuUi::run() {
@@ -118,8 +113,6 @@ void MenuUi::run() {
 
 void MenuUi::initializeMenu() {
     ESP_LOGI(TAG, "Adding menu items.");
-    menuStack.clear();
-    menuStack.push_back(&mainPage);
 
     mainPage.addMenuItem(createTaskItem);
     mainPage.addMenuItem(runningTasksItem);
@@ -133,6 +126,7 @@ void MenuUi::initializeMenu() {
     taskControlsPage.addMenuItem(taskStopItem);
     buildHistoryPage();
     historyBuilt = true;
+    buildWifiScanPage();
 
     moduleItems.reserve(sweeper.getModuleCount());
     moduleStatusTitles.resize(sweeper.getModuleCount());
@@ -150,30 +144,6 @@ void MenuUi::initializeMenu() {
     menu.drawMenu();
 }
 
-void MenuUi::pushMenuPage(GEMPage* page) {
-    if (page == nullptr) {
-        return;
-    }
-
-    if (!menuStack.empty() && menuStack.back() == page) {
-        return;
-    }
-
-    menuStack.push_back(page);
-    menu.setMenuPageCurrent(*page);
-    menu.drawMenu();
-}
-
-void MenuUi::popMenuPage() {
-    if (menuStack.size() <= 1) {
-        return;
-    }
-
-    menuStack.pop_back();
-    menu.setMenuPageCurrent(*menuStack.back());
-    menu.drawMenu();
-}
-
 void MenuUi::clearTaskOverlay() {
     selectedTaskForEdit = nullptr;
     display.clearBuffer();
@@ -186,8 +156,11 @@ void MenuUi::updateModuleStatusItems() {
         if (!status.available) {
             taskName = "OFFLINE";
         } else if (status.assigned) {
-            taskName = status.task == SweepMode::BLUETOOTH
-                ? "BLUETOOTH" : "ALL CHANNELS";
+            switch (status.task) {
+                case SweepMode::BLUETOOTH: taskName = "BLUETOOTH"; break;
+                case SweepMode::ALL_CHANNELS: taskName = "ALL CHANNELS"; break;
+                case SweepMode::WIFI_JAM: taskName = "WIFI JAM"; break;
+            }
         }
 
         snprintf(moduleStatusTitles[moduleId].data(), moduleStatusTitles[moduleId].size(),
@@ -207,6 +180,20 @@ void MenuUi::chooseTask(GEMCallbackData data) {
     }
 
     const auto selected = activeUi->taskRegistry->tasks()[data.valInt];
+
+    // A task that is already running/paused must not be reconfigured and
+    // re-started from here - that used to silently call start() again on a
+    // live task. Send the user to its controls (pause/stop/view) instead.
+    if (selected->status() == TaskStatus::RUNNING || selected->status() == TaskStatus::PAUSED) {
+        activeUi->selectedTaskForEdit = selected;
+        activeUi->taskPauseItem.setTitle(
+            selected->status() == TaskStatus::PAUSED ? "Resume Task" : "Pause Task");
+        activeUi->display.clearBuffer();
+        activeUi->menu.setMenuPageCurrent(activeUi->taskControlsPage);
+        activeUi->menu.drawMenu();
+        return;
+    }
+
     activeUi->selectedTaskForEdit = selected;
     activeUi->selectedModules.assign(activeUi->sweeper.getModuleCount(), false);
     const auto savedSelection = selected->getSelectedModuleIds();
@@ -217,7 +204,17 @@ void MenuUi::chooseTask(GEMCallbackData data) {
     }
     activeUi->updateModuleStatusItems();
     activeUi->display.clearBuffer();
-    activeUi->pushMenuPage(&activeUi->moduleStatusPage);
+
+    // WiFi Jam needs an extra step first: pick which networks/channels to
+    // target before picking the RF module(s).
+    if (auto* wifiTask = selected->asWifiJamTask()) {
+        activeUi->pendingWifiJamTask = wifiTask;
+        activeUi->beginWifiScan();
+        activeUi->menu.setMenuPageCurrent(activeUi->wifiScanPage);
+    } else {
+        activeUi->menu.setMenuPageCurrent(activeUi->moduleStatusPage);
+    }
+    activeUi->menu.drawMenu();
 }
 
 void MenuUi::showRunningTaskStatus(GEMCallbackData data) {
@@ -239,14 +236,16 @@ void MenuUi::showRunningTaskStatus(GEMCallbackData data) {
     activeUi->taskPauseItem.setTitle(
         activeUi->selectedTaskForEdit->status() == TaskStatus::PAUSED
             ? "Resume Task" : "Pause Task");
-    activeUi->pushMenuPage(&activeUi->taskControlsPage);
+    activeUi->menu.setMenuPageCurrent(activeUi->taskControlsPage);
+    activeUi->menu.drawMenu();
 }
 
 void MenuUi::showSelectedTaskScreen() {
     if (activeUi == nullptr || activeUi->selectedTaskForEdit == nullptr) {
         return;
     }
-    activeUi->pushMenuPage(&activeUi->taskStatusPage);
+    activeUi->menu.setMenuPageCurrent(activeUi->taskStatusPage);
+    activeUi->menu.drawMenu();
     activeUi->drawTaskStatusSection();
 }
 
@@ -281,8 +280,8 @@ void MenuUi::stopSelectedTask() {
                               TaskStatus::STOPPED, "Task stopped");
     activeUi->refreshTaskPages();
     activeUi->selectedTaskForEdit = nullptr;
+    activeUi->display.clearBuffer();
     activeUi->menu.setMenuPageCurrent(activeUi->runningTasksPage);
-    activeUi->menuStack.push_back(&activeUi->runningTasksPage);
     activeUi->menu.drawMenu();
 }
 
@@ -291,7 +290,8 @@ void MenuUi::showRfStatus() {
         activeUi->clearTaskOverlay();
         activeUi->updateModuleStatusItems();
         activeUi->display.clearBuffer();
-        activeUi->pushMenuPage(&activeUi->moduleStatusPage);
+        activeUi->menu.setMenuPageCurrent(activeUi->moduleStatusPage);
+        activeUi->menu.drawMenu();
         ESP_LOGI(TAG, "RF module status displayed.");
     }
 }
@@ -303,7 +303,9 @@ void MenuUi::toggleSelectedModule(GEMCallbackData data) {
 
     const int moduleId = data.valInt;
     const RfModuleStatus status = activeUi->sweeper.getModuleStatus(moduleId);
-    if (!status.available || status.assigned) {
+    const bool allowBusyModule = activeUi->selectedTaskForEdit != nullptr &&
+                                  activeUi->selectedTaskForEdit->allowsBusyModuleSelection();
+    if (!status.available || (status.assigned && !allowBusyModule)) {
         ESP_LOGW(TAG, "RF module %d is not available for selection.", moduleId);
         return;
     }
@@ -350,12 +352,11 @@ void MenuUi::confirmSelectedTask() {
         }
 
         activeUi->selectedTaskForEdit = nullptr;
+        activeUi->pendingWifiJamTask = nullptr;
         activeUi->selectedModules.assign(activeUi->sweeper.getModuleCount(), false);
         activeUi->updateModuleStatusItems();
         activeUi->refreshTaskPages();
         activeUi->display.clearBuffer();
-        activeUi->menuStack.clear();
-        activeUi->menuStack.push_back(&activeUi->mainPage);
         activeUi->menu.setMenuPageCurrent(activeUi->mainPage);
         activeUi->menu.drawMenu();
     }
@@ -380,15 +381,14 @@ void MenuUi::handleButtons() {
 }
 
 void MenuUi::drawTaskStatusSection() {
-    if (activeUi == nullptr) {
+    if (activeUi == nullptr || activeUi->selectedTaskForEdit == nullptr) {
         return;
     }
 
-    if (activeUi->selectedTaskForEdit == nullptr) {
-        return;
-    }
-
-    if (activeUi->menuStack.empty() || activeUi->menuStack.back() != &activeUi->taskStatusPage) {
+    // NOTE: relies on GEM_u8g2::getCurrentMenuPage() returning a GEMPage*.
+    // If your GEM version exposes it differently (e.g. by reference),
+    // adjust this comparison to match.
+    if (activeUi->menu.getCurrentMenuPage() != &activeUi->taskStatusPage) {
         return;
     }
 
@@ -477,6 +477,91 @@ void MenuUi::buildHistoryPage() {
     }
 }
 
+void MenuUi::buildWifiScanPage() {
+    wifiNetworkItems.reserve(MAX_WIFI_SCAN_RESULTS);
+    for (size_t index = 0; index < MAX_WIFI_SCAN_RESULTS; ++index) {
+        snprintf(wifiNetworkTitles[index].data(), wifiNetworkTitles[index].size(), "-- empty --");
+        wifiNetworkItems.push_back(std::make_unique<GEMItem>(
+            wifiNetworkTitles[index].data(), toggleSelectedNetwork, static_cast<int>(index)));
+        wifiScanPage.addMenuItem(*wifiNetworkItems.back());
+        wifiNetworkItems.back()->hide();
+    }
+    wifiScanPage.addMenuItem(wifiScanConfirmItem);
+}
+
+void MenuUi::beginWifiScan() {
+    display.clearBuffer();
+    display.setDrawColor(1);
+    display.setFont(u8g2_font_6x10_tr);
+    display.drawStr(0, 32, "Scanning WiFi...");
+    display.sendBuffer();
+
+    scannedNetworks = scanWifiNetworks();
+    if (scannedNetworks.size() > MAX_WIFI_SCAN_RESULTS) {
+        scannedNetworks.resize(MAX_WIFI_SCAN_RESULTS);
+    }
+    selectedNetworks.assign(MAX_WIFI_SCAN_RESULTS, false);
+    refreshWifiScanItems();
+}
+
+void MenuUi::refreshWifiScanItems() {
+    for (size_t index = 0; index < MAX_WIFI_SCAN_RESULTS; ++index) {
+        if (index < scannedNetworks.size()) {
+            const auto& network = scannedNetworks[index];
+            snprintf(wifiNetworkTitles[index].data(), wifiNetworkTitles[index].size(),
+                     "%s%.*s Ch%d", selectedNetworks[index] ? "[X] " : "[ ] ",
+                     28, network.ssid.empty() ? "(hidden)" : network.ssid.c_str(), network.channel);
+            wifiNetworkItems[index]->setTitle(wifiNetworkTitles[index].data());
+            wifiNetworkItems[index]->show();
+        } else {
+            wifiNetworkItems[index]->hide();
+        }
+    }
+}
+
+void MenuUi::toggleSelectedNetwork(GEMCallbackData data) {
+    if (activeUi == nullptr) {
+        return;
+    }
+
+    const int slot = data.valInt;
+    if (slot < 0 || static_cast<size_t>(slot) >= activeUi->scannedNetworks.size()) {
+        return;
+    }
+
+    activeUi->selectedNetworks[slot] = !activeUi->selectedNetworks[slot];
+    activeUi->refreshWifiScanItems();
+    activeUi->menu.drawMenu();
+}
+
+void MenuUi::confirmWifiChannels() {
+    if (activeUi == nullptr || activeUi->pendingWifiJamTask == nullptr) {
+        return;
+    }
+
+    std::vector<int> channels;
+    for (size_t index = 0; index < activeUi->scannedNetworks.size(); ++index) {
+        if (!activeUi->selectedNetworks[index]) {
+            continue;
+        }
+        const int channel = wifiChannelToRfOffset(activeUi->scannedNetworks[index].channel);
+        if (std::find(channels.begin(), channels.end(), channel) == channels.end()) {
+            channels.push_back(channel);
+        }
+    }
+
+    if (channels.empty()) {
+        ESP_LOGW(TAG, "No WiFi network selected for jamming.");
+        return;
+    }
+
+    activeUi->pendingWifiJamTask->setSelectedChannels(channels);
+    activeUi->pendingWifiJamTask = nullptr;
+    activeUi->display.clearBuffer();
+    activeUi->menu.setMenuPageCurrent(activeUi->moduleStatusPage);
+    activeUi->menu.drawMenu();
+}
+
 void MenuUi::refreshTaskPages() {
     if (taskRegistry != nullptr) {
         size_t itemIndex = 0;
@@ -524,7 +609,7 @@ void MenuUi::addRunningTask(std::shared_ptr<Task> task) {
         return;
     }
     for (const auto& existing : runningTasks) {
-        if (existing != nullptr && existing->name() == task->name()) {
+        if (existing != nullptr && std::strcmp(existing->name(), task->name()) == 0) {
             return;
         }
     }

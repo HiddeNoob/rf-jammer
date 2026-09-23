@@ -18,6 +18,8 @@ public:
         return std::make_shared<HistogramGraphTask>(sweeper_);
     }
 
+    bool allowsBusyModuleSelection() const override { return true; }
+
     void setSelectedModuleIds(const std::vector<int>& ids) override { selectedModuleIds_ = ids; }
     std::vector<int> getSelectedModuleIds() const override { return selectedModuleIds_; }
 
@@ -30,7 +32,10 @@ public:
                 return false;
             }
             const RfModuleStatus status = sweeper_.getModuleStatus(moduleId);
-            if (!status.available) {
+            // Must be online AND actively assigned to a sweep - a free
+            // module has no live data, so picking one would just show a
+            // permanently empty graph.
+            if (!status.available || !status.assigned) {
                 return false;
             }
         }
@@ -68,30 +73,50 @@ public:
         display.drawStr(0, 9, "HISTOGRAM");
         display.drawStr(76, 9, status() == TaskStatus::PAUSED ? "PAUSED" : "LIVE");
 
-        uint32_t maxValue = 1;
         std::vector<uint32_t> combinedHistogram(126, 0);
         for (int moduleId : selectedModuleIds_) {
             const auto moduleHistogram = sweeper_.getModuleHistogram(moduleId);
-            for (size_t i = 0; i < moduleHistogram.size(); ++i) {
+            for (size_t i = 0; i < moduleHistogram.size() && i < combinedHistogram.size(); ++i) {
                 combinedHistogram[i] += moduleHistogram[i];
-                if (combinedHistogram[i] > maxValue) {
-                    maxValue = combinedHistogram[i];
-                }
             }
         }
 
-        display.drawFrame(0, 12, 128, 52);
-        for (int bucket = 0; bucket < 16; ++bucket) {
-            uint32_t bucketValue = 0;
-            const int bucketStart = bucket * 8;
-            const int bucketEnd = std::min(bucketStart + 8, 126);
+        // Aggregate into the 16 display buckets FIRST, then find the
+        // tallest bucket. The old code scaled bar height against the
+        // tallest single channel, but each bar sums up to 8 channels - so
+        // a busy region's bucket total could be several times larger than
+        // that "max", overflowing the uint8_t height/y math below and
+        // pushing every bar off the top of the screen (nothing visible).
+        static constexpr int kBucketCount = 16;
+        static constexpr int kChannelsPerBucket = 8;
+        uint32_t bucketValues[kBucketCount] = {0};
+        uint32_t maxBucketValue = 0;
+        for (int bucket = 0; bucket < kBucketCount; ++bucket) {
+            const int bucketStart = bucket * kChannelsPerBucket;
+            const int bucketEnd = std::min(bucketStart + kChannelsPerBucket,
+                                            static_cast<int>(combinedHistogram.size()));
+            uint32_t value = 0;
             for (int channel = bucketStart; channel < bucketEnd; ++channel) {
-                bucketValue += combinedHistogram[channel];
+                value += combinedHistogram[channel];
             }
+            bucketValues[bucket] = value;
+            maxBucketValue = std::max(maxBucketValue, value);
+        }
 
-            const uint8_t height = maxValue > 0 ? static_cast<uint8_t>((bucketValue * 42) / maxValue) : 0;
+        display.drawFrame(0, 12, 128, 52);
+        constexpr uint8_t kMaxBarHeight = 42;
+        constexpr uint8_t kBaselineY = 61;
+        for (int bucket = 0; bucket < kBucketCount; ++bucket) {
+            uint8_t height = 0;
+            if (maxBucketValue > 0) {
+                const uint32_t scaled = (bucketValues[bucket] * kMaxBarHeight) / maxBucketValue;
+                height = static_cast<uint8_t>(std::min<uint32_t>(scaled, kMaxBarHeight));
+                if (bucketValues[bucket] > 0 && height == 0) {
+                    height = 1;  // any real detection stays visible, even if tiny
+                }
+            }
             const uint8_t x = 4 + bucket * 7;
-            const uint8_t y = 61 - height;
+            const uint8_t y = kBaselineY - height;
             display.drawBox(x, y, 5, height > 0 ? height : 1);
         }
     }

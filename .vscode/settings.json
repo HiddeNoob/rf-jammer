@@ -15,6 +15,6 @@
   ],
   "idf.flashType": "UART",
   "idf.port": "/dev/tty.usbmodem5B5E0788401",
-  "idf.currentSetup": "/Users/hiddenoob/.espressif/v6.0.2/esp-idf",
+  "idf.currentSetup": "/Users/hiddenoob/.espressif/v6.1/esp-idf",
   "idf.monitorPort": "/dev/tty.usbmodem5B5E0788401"
 }

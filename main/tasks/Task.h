@@ -7,6 +7,8 @@
 #include <U8g2lib.h>
 #include "RfSweeper.h"
 
+class WifiJamTask;  // forward declaration only; avoids a circular include
+
 enum class TaskStatus {
     IDLE,
     READY,
@@ -42,6 +44,18 @@ public:
 
     virtual void renderStatus(U8G2_SSD1306_128X64_NONAME_F_HW_I2C& display) = 0;
     virtual void renderConfig(U8G2_SSD1306_128X64_NONAME_F_HW_I2C& display) = 0;
+
+    // RTTI-free stand-in for dynamic_cast<WifiJamTask*>(this) - this project
+    // builds with -fno-rtti, so dynamic_cast isn't available. Base returns
+    // null; WifiJamTask overrides it to return itself.
+    virtual WifiJamTask* asWifiJamTask() { return nullptr; }
+
+    // Most tasks (sweeps, jamming) need to claim a module exclusively, so
+    // the module picker only lets them select free modules. A read-only
+    // observer task - the histogram viewer - instead needs to point at a
+    // module some OTHER task has already claimed and is actively sweeping,
+    // so it overrides this to allow picking busy modules too.
+    virtual bool allowsBusyModuleSelection() const { return false; }
 
     TaskStatus status() const { return status_; }
     void setStatus(TaskStatus status) { status_ = status; }
