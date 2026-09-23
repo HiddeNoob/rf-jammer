@@ -1,23 +1,25 @@
 #ifndef WIFI_JAM_TASK_H
 #define WIFI_JAM_TASK_H
 
-#include <algorithm>
 #include <cstdio>
 #include <memory>
 #include <vector>
 #include <U8g2lib.h>
-#include "Task.h"
+#include "RfTask.h"
 #include "WifiScanner.h"
 
 // Jams a set of RF channels derived from WiFi networks the user picked in
-// the UI (see MenuUi's WiFi scan page). Unlike ChannelSweeperTask, the
-// channel list isn't a fixed preset: it's supplied at configuration time via
-// setSelectedChannels(), so the menu must call that before start().
-class WifiJamTask : public Task {
+// the UI (see MenuUi's WiFi scan page). The only thing that makes this
+// different from a plain sweep task is WHICH channels get assigned and HOW
+// (the same explicit list to every module, instead of splitting a range) -
+// both expressed entirely by CustomChannelAssignmentStrategy. Everything
+// else (module selection, validate/start/pause/resume/stop) is inherited,
+// unchanged, from RfTask.
+class WifiJamTask : public RfTask {
 public:
-    explicit WifiJamTask(RfSweeper& sweeper) : sweeper_(sweeper) {}
-
-    const char* name() const override { return "WiFi Jam"; }
+    explicit WifiJamTask(RfSweeper& sweeper)
+        : RfTask(sweeper, "WiFi Jam", std::make_unique<CustomChannelAssignmentStrategy>()),
+          channelStrategy_(static_cast<CustomChannelAssignmentStrategy*>(strategy_.get())) {}
 
     std::shared_ptr<Task> clone() const override {
         return std::make_shared<WifiJamTask>(sweeper_);
@@ -25,66 +27,21 @@ public:
 
     WifiJamTask* asWifiJamTask() override { return this; }
 
-    void setSelectedModuleIds(const std::vector<int>& ids) override { selectedModuleIds_ = ids; }
-    std::vector<int> getSelectedModuleIds() const override { return selectedModuleIds_; }
-
     // Not part of the base Task interface (only WiFi jamming needs it) -
     // the menu sets this after the user confirms which networks to jam,
     // before the RF module picker and start() are reached.
-    void setSelectedChannels(const std::vector<int>& channels) { selectedChannels_ = channels; }
-    const std::vector<int>& getSelectedChannels() const { return selectedChannels_; }
-
-    bool validate() const override {
-        if (selectedModuleIds_.empty() || selectedChannels_.empty()) {
-            return false;
-        }
-        for (int moduleId : selectedModuleIds_) {
-            if (moduleId < 0 || moduleId >= sweeper_.getModuleCount()) {
-                return false;
-            }
-            const RfModuleStatus status = sweeper_.getModuleStatus(moduleId);
-            if (!status.available || status.assigned) {
-                return false;
-            }
-        }
-        return true;
+    void setSelectedChannels(const std::vector<int>& channels) {
+        channelStrategy_->setChannels(channels);
     }
-
-    bool start() override {
-        if (!validate()) {
-            setStatus(TaskStatus::FAILED);
-            return false;
-        }
-        const bool ok = sweeper_.assignCustomChannels(selectedModuleIds_, selectedChannels_);
-        setStatus(ok ? TaskStatus::RUNNING : TaskStatus::FAILED);
-        return ok;
-    }
-
-    void stop() override {
-        sweeper_.stopTask(selectedModuleIds_);
-        setStatus(TaskStatus::STOPPED);
-    }
-
-    bool pause() override {
-        if (status() != TaskStatus::RUNNING) return false;
-        sweeper_.pauseTask(selectedModuleIds_);
-        setStatus(TaskStatus::PAUSED);
-        return true;
-    }
-
-    bool resume() override {
-        if (status() != TaskStatus::PAUSED) return false;
-        sweeper_.resumeTask(selectedModuleIds_);
-        setStatus(TaskStatus::RUNNING);
-        return true;
-    }
+    const std::vector<int>& getSelectedChannels() const { return channelStrategy_->channels(); }
 
     void renderStatus(U8G2_SSD1306_128X64_NONAME_F_HW_I2C& display) override {
         display.setDrawColor(1);
         display.setFont(u8g2_font_6x10_tr);
         display.drawStr(0, 12, "WiFi Jam");
         char line[24];
-        snprintf(line, sizeof(line), "%d channel(s)", static_cast<int>(selectedChannels_.size()));
+        const auto& channels = channelStrategy_->channels();
+        snprintf(line, sizeof(line), "%d channel(s)", static_cast<int>(channels.size()));
         display.drawStr(0, 24, line);
         snprintf(line, sizeof(line), "%d module(s)", static_cast<int>(selectedModuleIds_.size()));
         display.drawStr(0, 36, line);
@@ -95,17 +52,20 @@ public:
         display.setDrawColor(1);
         display.setFont(u8g2_font_6x10_tr);
         display.drawStr(0, 12, "WiFi Jam");
-        for (size_t i = 0; i < selectedChannels_.size() && i < 3; ++i) {
+        const auto& channels = channelStrategy_->channels();
+        for (size_t i = 0; i < channels.size() && i < 3; ++i) {
             char line[16];
-            snprintf(line, sizeof(line), "Ch %d", selectedChannels_[i]);
+            snprintf(line, sizeof(line), "Ch %d", channels[i]);
             display.drawStr(0, 24 + static_cast<int>(i) * 10, line);
         }
     }
 
 private:
-    RfSweeper& sweeper_;
-    std::vector<int> selectedModuleIds_;
-    std::vector<int> selectedChannels_;
+    // Owned by strategy_ in the base class; kept here typed so
+    // setSelectedChannels()/getSelectedChannels() and rendering can reach
+    // the channel list without every caller needing an
+    // RfAssignmentStrategy-vs-CustomChannelAssignmentStrategy cast.
+    CustomChannelAssignmentStrategy* channelStrategy_;
 };
 
 #endif

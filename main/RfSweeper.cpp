@@ -4,7 +4,7 @@
 #include <numeric>
 #include <utility>
 #include "EspHal.h"
-#include "esp_log.h"
+#include "AppLog.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -28,7 +28,7 @@ RadioHandle openRadio(const RadioConfig& config) {
 
     const int state = handle.radio->begin(2400.0f, 1000, config.power, 5);
     if (state != RADIOLIB_ERR_NONE) {
-        ESP_LOGE("init_radio", "Radio init failed (CSN %d): %d", config.csn, state);
+        APP_LOGE("init_radio", "Radio init failed (CSN %d): %d", config.csn, state);
         delete handle.radio;
         delete handle.module;
         delete handle.hal;
@@ -75,27 +75,50 @@ void RfSweeper::runRfTask(void* parameters) {
 void RfSweeper::runRadioJob(RadioWorker& job) {
     char taskTag[32];
     snprintf(taskTag, sizeof(taskTag), "RF_Task_%d", job.moduleId);
-    ESP_LOGI(taskTag, "Task started. %d channel(s) assigned.", static_cast<int>(job.channels.size()));
+    APP_LOGI(taskTag, "Task started. %d channel(s) assigned.", static_cast<int>(job.channels.size()));
 
     size_t channelIndex = 0;
+    bool radioIdle = false;  // true once standby() has been sent for this pause
     while (job.active) {
         if (job.paused) {
+            // setFrequency()+transmitDirect() (jamming) or startReceive()
+            // (sweeping) put the radio into a continuous, self-sustaining
+            // mode that keeps running on its own until something explicitly
+            // tells it to stop - just not calling them again here does NOT
+            // stop it. Without this, a "paused" jam task keeps jamming and
+            // a "paused" sweep keeps receiving on whatever channel it was
+            // last on; only the channel-hopping actually paused.
+            if (!radioIdle) {
+                job.radio->standby();
+                radioIdle = true;
+            }
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
+        radioIdle = false;
 
         const int channel = job.channels[channelIndex];
         const float frequency = 2400.0f + static_cast<float>(channel);
         job.radio->setFrequency(frequency);
-        job.radio->transmitDirect();
-
-        if (job.radio->isCarrierDetected()) {
-            job.histogram[channel]++;
+        if (job.mode == SweepMode::WIFI_JAM) {
+            job.radio->transmitDirect();
+        } else if (job.radio->startReceive() == RADIOLIB_ERR_NONE) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+            if (job.radio->isCarrierDetected()) {
+                job.histogram[channel]++;
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(1));
         channelIndex = (channelIndex + 1) % job.channels.size();
     }
+
+    // stop() only sets job.active = false, which ends this loop - it
+    // doesn't by itself interrupt a continuous transmit/receive already in
+    // progress on the chip (same issue as pause, see above). Without this,
+    // a module that was jamming when stopped could keep transmitting for a
+    // moment after this task and its objects are gone.
+    job.radio->standby();
 
     // We are the exclusive owner of this hardware once assigned, so it's
     // safe to free it here, right before the task disappears. This closes
@@ -129,7 +152,7 @@ RfSweeper::RfSweeper() {
 
     for (const RadioConfig& config : RADIO_CONFIGS) {
         if (!probeRadioOnline(config)) {
-            ESP_LOGW("rf_sweeper",
+            APP_LOGW("rf_sweeper",
                     "RF module %d is offline at boot; it will be added only when it is online.",
                     config.id);
             continue;
@@ -138,7 +161,7 @@ RfSweeper::RfSweeper() {
     }
 
     if (modules.empty()) {
-        ESP_LOGW("rf_sweeper", "No RF modules are online at boot.");
+        APP_LOGW("rf_sweeper", "No RF modules are online at boot.");
     }
 }
 
@@ -154,7 +177,7 @@ void RfSweeper::start(SweepMode mode) {
 
 bool RfSweeper::validateModulesFree(const std::vector<int>& moduleIds) const {
     if (moduleIds.empty()) {
-        ESP_LOGW("rf_sweeper", "No RF modules selected.");
+        APP_LOGW("rf_sweeper", "No RF modules selected.");
         return false;
     }
 
@@ -162,7 +185,7 @@ bool RfSweeper::validateModulesFree(const std::vector<int>& moduleIds) const {
     for (const int moduleId : moduleIds) {
         if (moduleId < 0 || static_cast<size_t>(moduleId) >= modules.size()
             || seen[moduleId] || modules[moduleId].assigned || !modules[moduleId].available) {
-            ESP_LOGW("rf_sweeper", "RF module %d cannot be assigned (busy, offline, or invalid).", moduleId);
+            APP_LOGW("rf_sweeper", "RF module %d cannot be assigned (busy, offline, or invalid).", moduleId);
             return false;
         }
         seen[moduleId] = true;
@@ -267,7 +290,7 @@ bool RfSweeper::assignTask(const std::vector<int>& moduleIds, SweepMode mode) {
 
     std::vector<int> channels = getChannelsForMode(mode);
     if (moduleIds.size() > channels.size()) {
-        ESP_LOGW("rf_sweeper", "Cannot assign %d RF modules to %d channels.",
+        APP_LOGW("rf_sweeper", "Cannot assign %d RF modules to %d channels.",
                  static_cast<int>(moduleIds.size()), static_cast<int>(channels.size()));
         return false;
     }
@@ -290,13 +313,13 @@ bool RfSweeper::assignTask(const std::vector<int>& moduleIds, SweepMode mode) {
     }
 
     if (!launchWorkers(moduleIds, radios, modulesOut, halsOut, channelsPerWorker, mode)) {
-        ESP_LOGE("rf_sweeper", "Could not start RF task.");
+        APP_LOGE("rf_sweeper", "Could not start RF task.");
         return false;
     }
 
     for (size_t index = 0; index < moduleIds.size(); ++index) {
         modules[moduleIds[index]] = {moduleIds[index], true, true, mode};
-        ESP_LOGI("rf_sweeper", "RF module %d assigned %d channel(s).",
+        APP_LOGI("rf_sweeper", "RF module %d assigned %d channel(s).",
                  moduleIds[index], static_cast<int>(channelsPerWorker[index].size()));
     }
     return true;
@@ -304,7 +327,7 @@ bool RfSweeper::assignTask(const std::vector<int>& moduleIds, SweepMode mode) {
 
 bool RfSweeper::assignCustomChannels(const std::vector<int>& moduleIds, const std::vector<int>& channels) {
     if (channels.empty()) {
-        ESP_LOGW("rf_sweeper", "No channels given for custom RF task.");
+        APP_LOGW("rf_sweeper", "No channels given for custom RF task.");
         return false;
     }
     if (!validateModulesFree(moduleIds)) {
@@ -323,14 +346,14 @@ bool RfSweeper::assignCustomChannels(const std::vector<int>& moduleIds, const st
     std::vector<std::vector<int>> channelsPerWorker(moduleIds.size(), channels);
 
     if (!launchWorkers(moduleIds, radios, modulesOut, halsOut, channelsPerWorker, SweepMode::WIFI_JAM)) {
-        ESP_LOGE("rf_sweeper", "Could not start WiFi jam task.");
+        APP_LOGE("rf_sweeper", "Could not start WiFi jam task.");
         return false;
     }
 
     for (const int moduleId : moduleIds) {
         modules[moduleId] = {moduleId, true, true, SweepMode::WIFI_JAM};
     }
-    ESP_LOGI("rf_sweeper", "WiFi jam started: %d channel(s), %d module(s).",
+    APP_LOGI("rf_sweeper", "WiFi jam started: %d channel(s), %d module(s).",
              static_cast<int>(channels.size()), static_cast<int>(moduleIds.size()));
     return true;
 }

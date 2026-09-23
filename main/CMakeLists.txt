@@ -9,3 +9,7 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
     -Wno-missing-field-initializers
     -Wno-error=missing-field-initializers
 )
+
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    APP_LOG_ENABLED=$<BOOL:${APP_LOG_ENABLED}>
+)

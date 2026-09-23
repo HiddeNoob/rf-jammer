@@ -7,7 +7,7 @@
 #include <vector>
 #include <Wire.h>
 #include "driver/gpio.h"
-#include "esp_log.h"
+#include "AppLog.h"
 
 namespace {
 constexpr char TAG[] = "menu_ui";
@@ -28,25 +28,26 @@ MenuUi::MenuUi(RfSweeper& sweeper, TaskRegistry* registry, TaskHistory* history)
       taskHistory(history),
       display(U8G2_R0, U8X8_PIN_NONE, OLED_SCL, OLED_SDA),
       mainPage("RF Menu"),
-            createTaskPage("Create Task", mainPage),
-            runningTasksPage("Current Running Tasks", mainPage),
-            taskControlsPage("Task Controls", runningTasksPage),
-            taskStatusPage("Task Screen", taskControlsPage),
-            taskHistoryPage("Task History", mainPage),
-            rfModulesPage("RF Modules", createTaskPage),
-            moduleStatusPage("RF Status", rfModulesPage),
-            wifiScanPage("WiFi Networks", createTaskPage),
-            createTaskItem("Create Task", createTaskPage),
-            runningTasksItem("Current Running Tasks", runningTasksPage),
-            taskPauseItem("Pause Task", toggleTaskPause),
-            taskStopItem("Stop Task", stopSelectedTask),
-            taskViewItem("View Task Screen", showSelectedTaskScreen),
-            taskHistoryItem("Task History", taskHistoryPage),
-            rfModulesItem("RF Modules", rfModulesPage),
-            statusItem("Current Status", showRfStatus),
-            confirmTaskItem("Confirm RF Selection", confirmSelectedTask),
-            infoItem("System Information", showInfo),
-            wifiScanConfirmItem("Confirm Channels", confirmWifiChannels),
+      createTaskPage("Create Task", mainPage),
+      runningTasksPage("Current Running Tasks", mainPage),
+      taskControlsPage("Task Controls", runningTasksPage),
+      taskStatusPage("Task Screen", taskControlsPage),
+      taskHistoryPage("Task History", mainPage),
+      // rfModulesPage kaldırıldı. moduleStatusPage artık doğrudan
+      // createTaskPage'in çocuğu; geri tuşu kullanıcıyı erişilemez bir
+      // yetim sayfaya atmıyor.
+      moduleStatusPage("RF Status", createTaskPage),
+      wifiScanPage("WiFi Networks", createTaskPage),
+      createTaskItem("Create Task", createTaskPage),
+      runningTasksItem("Current Running Tasks", runningTasksPage),
+      taskPauseItem("Pause Task", toggleTaskPause),
+      taskStopItem("Stop Task", stopSelectedTask),
+      taskViewItem("View Task Screen", showSelectedTaskScreen),
+      taskHistoryItem("Task History", taskHistoryPage),
+      // rfModulesItem kaldırıldı.
+      statusItem("Current Status", showRfStatus),
+      confirmTaskItem("Confirm RF Selection", confirmSelectedTask),
+      wifiScanConfirmItem("Confirm Channels", confirmWifiChannels),
       menu(display, GEM_POINTER_ROW, GEM_ITEMS_COUNT_AUTO) {
     if (taskRegistry == nullptr) {
         static TaskRegistry defaultRegistry;
@@ -65,10 +66,10 @@ MenuUi::MenuUi(RfSweeper& sweeper, TaskRegistry* registry, TaskHistory* history)
 
 void MenuUi::run() {
     activeUi = this;
-    ESP_LOGI(TAG, "Menu UI task started.");
+    APP_LOGI(TAG, "Menu UI task started.");
 
     initArduino();
-    ESP_LOGI(TAG, "Arduino initialized. Starting I2C on SDA=%d, SCL=%d.",
+    APP_LOGI(TAG, "Arduino initialized. Starting I2C on SDA=%d, SCL=%d.",
              OLED_SDA, OLED_SCL);
     Wire.begin(OLED_SDA, OLED_SCL);
     bool oledDetected = false;
@@ -80,10 +81,10 @@ void MenuUi::run() {
         }
     }
     if (!oledDetected || display.begin() == 0) {
-        ESP_LOGE(TAG, "OLED initialization failed: no responding SSD1306 found.");
+        APP_LOGE(TAG, "OLED initialization failed: no responding SSD1306 found.");
         return;
     }
-    ESP_LOGI(TAG, "OLED initialized.");
+    APP_LOGI(TAG, "OLED initialized.");
 
     gpio_config_t ioConfig = {};
     ioConfig.intr_type = GPIO_INTR_DISABLE;
@@ -92,11 +93,11 @@ void MenuUi::run() {
         | (1ULL << BTN_SELECT_PIN);
     ioConfig.pull_up_en = GPIO_PULLUP_ENABLE;
     gpio_config(&ioConfig);
-    ESP_LOGI(TAG, "Buttons initialized: UP=%d, DOWN=%d, SELECT=%d.",
+    APP_LOGI(TAG, "Buttons initialized: UP=%d, DOWN=%d, SELECT=%d.",
              BTN_UP_PIN, BTN_DOWN_PIN, BTN_SELECT_PIN);
 
     initializeMenu();
-    ESP_LOGI(TAG, "Menu initialized. Entering event loop.");
+    APP_LOGI(TAG, "Menu initialized. Entering event loop.");
 
     int heartbeatCount = 0;
     for (;;) {
@@ -105,19 +106,18 @@ void MenuUi::run() {
         vTaskDelay(pdMS_TO_TICKS(20));
 
         if (++heartbeatCount >= 250) {
-            ESP_LOGI(TAG, "Menu UI is running.");
+            APP_LOGI(TAG, "Menu UI is running.");
             heartbeatCount = 0;
         }
     }
 }
 
 void MenuUi::initializeMenu() {
-    ESP_LOGI(TAG, "Adding menu items.");
+    APP_LOGI(TAG, "Adding menu items.");
 
     mainPage.addMenuItem(createTaskItem);
     mainPage.addMenuItem(runningTasksItem);
     mainPage.addMenuItem(taskHistoryItem);
-    mainPage.addMenuItem(infoItem);
 
     buildCreateTaskPage();
     buildRunningTasksPage();
@@ -292,7 +292,7 @@ void MenuUi::showRfStatus() {
         activeUi->display.clearBuffer();
         activeUi->menu.setMenuPageCurrent(activeUi->moduleStatusPage);
         activeUi->menu.drawMenu();
-        ESP_LOGI(TAG, "RF module status displayed.");
+        APP_LOGI(TAG, "RF module status displayed.");
     }
 }
 
@@ -306,7 +306,7 @@ void MenuUi::toggleSelectedModule(GEMCallbackData data) {
     const bool allowBusyModule = activeUi->selectedTaskForEdit != nullptr &&
                                   activeUi->selectedTaskForEdit->allowsBusyModuleSelection();
     if (!status.available || (status.assigned && !allowBusyModule)) {
-        ESP_LOGW(TAG, "RF module %d is not available for selection.", moduleId);
+        APP_LOGW(TAG, "RF module %d is not available for selection.", moduleId);
         return;
     }
 
@@ -339,7 +339,7 @@ void MenuUi::confirmSelectedTask() {
         if (!valid) {
             activeUi->selectedTaskForEdit->setStatus(TaskStatus::FAILED);
             activeUi->addHistoryEntry(activeUi->selectedTaskForEdit->name(), TaskStatus::FAILED, "Validation failed");
-            ESP_LOGW(TAG, "Task validation failed for %s.", activeUi->selectedTaskForEdit->name());
+            APP_LOGW(TAG, "Task validation failed for %s.", activeUi->selectedTaskForEdit->name());
         } else {
             const bool started = activeUi->selectedTaskForEdit->start();
             activeUi->selectedTaskForEdit->setStatus(started ? TaskStatus::RUNNING : TaskStatus::FAILED);
@@ -348,7 +348,7 @@ void MenuUi::confirmSelectedTask() {
             }
             activeUi->addHistoryEntry(activeUi->selectedTaskForEdit->name(), started ? TaskStatus::RUNNING : TaskStatus::FAILED,
                                      started ? "Task started" : "Task start failed");
-            ESP_LOGI(TAG, "RF selection confirmation %s.", started ? "accepted" : "rejected");
+            APP_LOGI(TAG, "RF selection confirmation %s.", started ? "accepted" : "rejected");
         }
 
         activeUi->selectedTaskForEdit = nullptr;
@@ -364,17 +364,17 @@ void MenuUi::confirmSelectedTask() {
 
 void MenuUi::handleButtons() {
     if (gpio_get_level(BTN_UP_PIN) == 0) {
-        ESP_LOGI(TAG, "UP button pressed.");
+        APP_LOGI(TAG, "UP button pressed.");
         menu.registerKeyPress(GEM_KEY_UP);
         vTaskDelay(pdMS_TO_TICKS(150));
     }
     if (gpio_get_level(BTN_DOWN_PIN) == 0) {
-        ESP_LOGI(TAG, "DOWN button pressed.");
+        APP_LOGI(TAG, "DOWN button pressed.");
         menu.registerKeyPress(GEM_KEY_DOWN);
         vTaskDelay(pdMS_TO_TICKS(150));
     }
     if (gpio_get_level(BTN_SELECT_PIN) == 0) {
-        ESP_LOGI(TAG, "SELECT button pressed.");
+        APP_LOGI(TAG, "SELECT button pressed.");
         menu.registerKeyPress(GEM_KEY_OK);
         vTaskDelay(pdMS_TO_TICKS(150));
     }
@@ -437,11 +437,14 @@ void MenuUi::renderTaskStatusForCurrentSelection() {
 void MenuUi::buildCreateTaskPage() {
     if (taskRegistry != nullptr) {
         for (size_t index = 0; index < taskRegistry->tasks().size(); ++index) {
-            taskItems.push_back(std::make_unique<GEMItem>(taskRegistry->tasks()[index]->name(), chooseTask, static_cast<int>(index)));
+            taskItems.push_back(std::make_unique<GEMItem>(
+                taskRegistry->tasks()[index]->name(), chooseTask, static_cast<int>(index)));
             createTaskPage.addMenuItem(*taskItems.back());
         }
     }
-    rfModulesPage.addMenuItem(statusItem);
+    // statusItem artık createTaskPage'e ekleniyor; rfModulesPage kaldırıldığı
+    // için "Current Status" buradan erişilebilir durumda.
+    createTaskPage.addMenuItem(statusItem);
 }
 
 void MenuUi::buildRunningTasksPage() {
@@ -551,7 +554,7 @@ void MenuUi::confirmWifiChannels() {
     }
 
     if (channels.empty()) {
-        ESP_LOGW(TAG, "No WiFi network selected for jamming.");
+        APP_LOGW(TAG, "No WiFi network selected for jamming.");
         return;
     }
 
@@ -625,6 +628,6 @@ void MenuUi::addHistoryEntry(const std::string& name, TaskStatus status, const s
 void MenuUi::showInfo() {
     if (activeUi != nullptr) {
         activeUi->drawTaskStatusSection();
-        std::printf(">> RF sweep: %s\n", activeUi->sweeper.isRunning() ? "RUNNING" : "STOPPED");
+        APP_LOGI(TAG, "RF sweep: %s", activeUi->sweeper.isRunning() ? "RUNNING" : "STOPPED");
     }
 }

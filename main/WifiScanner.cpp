@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <map>
 #include "esp_event.h"
-#include "esp_log.h"
+#include "AppLog.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "nvs_flash.h"
@@ -23,7 +23,7 @@ bool ensureWifiInitialized() {
         err = nvs_flash_init();
     }
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "nvs_flash_init failed: %d", err);
+        APP_LOGE(TAG, "nvs_flash_init failed: %d", err);
         return false;
     }
 
@@ -33,7 +33,7 @@ bool ensureWifiInitialized() {
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     if (esp_wifi_init(&cfg) != ESP_OK) {
-        ESP_LOGE(TAG, "esp_wifi_init failed.");
+        APP_LOGE(TAG, "esp_wifi_init failed.");
         return false;
     }
     esp_wifi_set_mode(WIFI_MODE_STA);
@@ -53,7 +53,7 @@ std::vector<WifiNetwork> scanWifiNetworks() {
     wifi_scan_config_t scanConfig = {};
     scanConfig.show_hidden = true;
     if (esp_wifi_scan_start(&scanConfig, true /* block */) != ESP_OK) {
-        ESP_LOGW(TAG, "WiFi scan failed to start.");
+        APP_LOGW(TAG, "WiFi scan failed to start.");
         return results;
     }
 

@@ -14,9 +14,6 @@
 #include "tasks/HistogramGraphTask.h"
 #include "tasks/WifiJamTask.h"
 
-// Maximum number of scanned WiFi networks shown at once on the WiFi Jam
-// channel picker. GEM pages need a fixed set of items, so slots beyond the
-// scan result count are simply hidden (same pattern as the history page).
 inline constexpr size_t MAX_WIFI_SCAN_RESULTS = 16;
 
 class MenuUi {
@@ -73,8 +70,6 @@ private:
     std::vector<bool> selectedModules;
     std::shared_ptr<Task> selectedTaskForEdit;
 
-    // WiFi Jam flow state: which task is being configured, what the last
-    // scan found, and which of those results the user has checked.
     WifiJamTask* pendingWifiJamTask = nullptr;
     std::vector<WifiNetwork> scannedNetworks;
     std::vector<bool> selectedNetworks;
@@ -89,8 +84,8 @@ private:
     GEMPage taskControlsPage;
     GEMPage taskStatusPage;
     GEMPage taskHistoryPage;
-    GEMPage rfModulesPage;
-    GEMPage moduleStatusPage;
+    // rfModulesPage KALDIRILDI: hiçbir menüden erişilemeyen yetim sayfaydı.
+    GEMPage moduleStatusPage;   // parent'ı artık doğrudan createTaskPage
     GEMPage wifiScanPage;
     GEMItem createTaskItem;
     GEMItem runningTasksItem;
@@ -98,10 +93,9 @@ private:
     GEMItem taskStopItem;
     GEMItem taskViewItem;
     GEMItem taskHistoryItem;
-    GEMItem rfModulesItem;
+    // rfModulesItem KALDIRILDI: hiçbir sayfaya eklenmiyordu.
     GEMItem statusItem;
     GEMItem confirmTaskItem;
-    GEMItem infoItem;
     GEMItem wifiScanConfirmItem;
     GEM_u8g2 menu;
 };

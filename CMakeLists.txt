@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
+option(APP_LOG_ENABLED "Include application diagnostic logs" ON)
+
 # include the top-level cmake
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
