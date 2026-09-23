@@ -47,6 +47,14 @@ void RfSweeper::runRadioJob(RadioWorker& job) {
 
     size_t channelIndex = 0;
     for (;;) {
+        if (!job.active) {
+            vTaskDelete(nullptr);
+            return;
+        }
+        if (job.paused) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
         const int channel = job.channels[channelIndex];
         const float frequency = 2400.0f + static_cast<float>(channel);
         job.radio->setFrequency(frequency);
@@ -194,6 +202,35 @@ bool RfSweeper::runTask(RFJob job) {
         }
     }
     return true;
+}
+
+void RfSweeper::pauseTask(const std::vector<int>& moduleIds) {
+    for (const auto& radioJob : radioJobs) {
+        if (radioJob != nullptr && std::find(moduleIds.begin(), moduleIds.end(), radioJob->moduleId) != moduleIds.end()) {
+            radioJob->paused = true;
+        }
+    }
+}
+
+void RfSweeper::resumeTask(const std::vector<int>& moduleIds) {
+    for (const auto& radioJob : radioJobs) {
+        if (radioJob != nullptr && std::find(moduleIds.begin(), moduleIds.end(), radioJob->moduleId) != moduleIds.end()) {
+            radioJob->paused = false;
+        }
+    }
+}
+
+void RfSweeper::stopTask(const std::vector<int>& moduleIds) {
+    for (const int moduleId : moduleIds) {
+        for (const auto& radioJob : radioJobs) {
+            if (radioJob != nullptr && radioJob->moduleId == moduleId) {
+                radioJob->active = false;
+            }
+        }
+        if (moduleId >= 0 && static_cast<size_t>(moduleId) < modules.size()) {
+            modules[moduleId].assigned = false;
+        }
+    }
 }
 
 RfModuleStatus RfSweeper::getModuleStatus(int moduleId) const {

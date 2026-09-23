@@ -1,5 +1,13 @@
 #include "EspHal.h"
 
+namespace {
+bool spiBusInitialized[2] = {false, false};
+
+int spiBusIndex(spi_host_device_t host) {
+    return host == SPI3_HOST ? 1 : 0;
+}
+}
+
 EspHal::EspHal(int8_t sck, int8_t miso, int8_t mosi, spi_host_device_t host)
     : RadioLibHal(GPIO_MODE_INPUT, GPIO_MODE_OUTPUT, 0, 1, GPIO_INTR_POSEDGE, GPIO_INTR_NEGEDGE),
       sckPin(sck), misoPin(miso), mosiPin(mosi), spiHost(host) {}
@@ -85,7 +93,14 @@ void EspHal::spiBegin() {
     buscfg.quadhd_io_num = -1;
     buscfg.max_transfer_sz = SOC_SPI_MAXIMUM_BUFFER_SIZE;
 
-    spi_bus_initialize(spiHost, &buscfg, SPI_DMA_CH_AUTO);
+    const int busIndex = spiBusIndex(spiHost);
+    if (!spiBusInitialized[busIndex]) {
+        const esp_err_t result = spi_bus_initialize(spiHost, &buscfg, SPI_DMA_CH_AUTO);
+        if (result != ESP_OK && result != ESP_ERR_INVALID_STATE) {
+            return;
+        }
+        spiBusInitialized[busIndex] = true;
+    }
 
     spi_device_interface_config_t devcfg = {};
     devcfg.clock_speed_hz = 8 * 1000 * 1000;

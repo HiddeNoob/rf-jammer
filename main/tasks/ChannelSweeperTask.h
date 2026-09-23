@@ -47,7 +47,22 @@ public:
     }
 
     void stop() override {
+        sweeper_.stopTask(selectedModuleIds_);
         setStatus(TaskStatus::STOPPED);
+    }
+
+    bool pause() override {
+        if (status() != TaskStatus::RUNNING) return false;
+        sweeper_.pauseTask(selectedModuleIds_);
+        setStatus(TaskStatus::PAUSED);
+        return true;
+    }
+
+    bool resume() override {
+        if (status() != TaskStatus::PAUSED) return false;
+        sweeper_.resumeTask(selectedModuleIds_);
+        setStatus(TaskStatus::RUNNING);
+        return true;
     }
 
     void renderStatus(U8G2_SSD1306_128X64_NONAME_F_HW_I2C& display) override {

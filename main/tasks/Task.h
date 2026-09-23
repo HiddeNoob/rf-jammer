@@ -11,6 +11,7 @@ enum class TaskStatus {
     IDLE,
     READY,
     RUNNING,
+    PAUSED,
     SUCCEEDED,
     FAILED,
     STOPPED
@@ -35,6 +36,8 @@ public:
 
     virtual bool validate() const = 0;
     virtual bool start() = 0;
+    virtual bool pause() = 0;
+    virtual bool resume() = 0;
     virtual void stop() = 0;
 
     virtual void renderStatus(U8G2_SSD1306_128X64_NONAME_F_HW_I2C& display) = 0;

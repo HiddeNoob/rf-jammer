@@ -50,11 +50,23 @@ public:
         setStatus(TaskStatus::STOPPED);
     }
 
+    bool pause() override {
+        if (status() != TaskStatus::RUNNING) return false;
+        setStatus(TaskStatus::PAUSED);
+        return true;
+    }
+
+    bool resume() override {
+        if (status() != TaskStatus::PAUSED) return false;
+        setStatus(TaskStatus::RUNNING);
+        return true;
+    }
+
     void renderStatus(U8G2_SSD1306_128X64_NONAME_F_HW_I2C& display) override {
         display.setDrawColor(1);
         display.setFont(u8g2_font_6x10_tr);
-        display.drawStr(0, 12, "Histogram");
-        display.drawStr(0, 24, selectedModuleIds_.empty() ? "No RF selected" : "RF live graph");
+        display.drawStr(0, 9, "HISTOGRAM");
+        display.drawStr(76, 9, status() == TaskStatus::PAUSED ? "PAUSED" : "LIVE");
 
         uint32_t maxValue = 1;
         std::vector<uint32_t> combinedHistogram(126, 0);
@@ -68,6 +80,7 @@ public:
             }
         }
 
+        display.drawFrame(0, 12, 128, 52);
         for (int bucket = 0; bucket < 16; ++bucket) {
             uint32_t bucketValue = 0;
             const int bucketStart = bucket * 8;
@@ -76,10 +89,10 @@ public:
                 bucketValue += combinedHistogram[channel];
             }
 
-            const uint8_t height = maxValue > 0 ? static_cast<uint8_t>((bucketValue * 8) / maxValue) : 0;
-            const uint8_t x = 22 + bucket * 6;
-            const uint8_t y = 58 - height;
-            display.drawBox(x, y, 4, height > 0 ? height : 1);
+            const uint8_t height = maxValue > 0 ? static_cast<uint8_t>((bucketValue * 42) / maxValue) : 0;
+            const uint8_t x = 4 + bucket * 7;
+            const uint8_t y = 61 - height;
+            display.drawBox(x, y, 5, height > 0 ? height : 1);
         }
     }
 

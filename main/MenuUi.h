@@ -25,6 +25,9 @@ public:
 private:
     static void chooseTask(GEMCallbackData data);
     static void showRunningTaskStatus(GEMCallbackData data);
+    static void showSelectedTaskScreen();
+    static void toggleTaskPause();
+    static void stopSelectedTask();
     static void showRfStatus();
     static void toggleSelectedModule(GEMCallbackData data);
     static void confirmSelectedTask();
@@ -54,6 +57,7 @@ private:
     std::vector<std::unique_ptr<GEMItem>> taskItems;
     std::vector<std::unique_ptr<GEMItem>> runningTaskItems;
     std::vector<std::unique_ptr<GEMItem>> historyItems;
+    std::array<std::array<char, 40>, 8> historyTitles{};
     std::vector<std::unique_ptr<GEMItem>> moduleItems;
     std::vector<std::array<char, 50>> moduleStatusTitles;
     std::vector<GEMPage*> menuStack;
@@ -63,12 +67,17 @@ private:
     GEMPage mainPage;
     GEMPage createTaskPage;
     GEMPage runningTasksPage;
+    GEMPage taskControlsPage;
+    GEMPage taskStatusPage;
     GEMPage taskHistoryPage;
     GEMPage rfModulesPage;
     GEMPage moduleStatusPage;
     bool historyBuilt = false;
     GEMItem createTaskItem;
     GEMItem runningTasksItem;
+    GEMItem taskPauseItem;
+    GEMItem taskStopItem;
+    GEMItem taskViewItem;
     GEMItem taskHistoryItem;
     GEMItem rfModulesItem;
     GEMItem statusItem;

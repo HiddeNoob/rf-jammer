@@ -43,6 +43,9 @@ public:
     RfSweeper();
     void start(SweepMode mode);
     bool assignTask(const std::vector<int>& moduleIds, SweepMode mode);
+    void pauseTask(const std::vector<int>& moduleIds);
+    void resumeTask(const std::vector<int>& moduleIds);
+    void stopTask(const std::vector<int>& moduleIds);
     bool runTask(RFJob job);
     RfModuleStatus getModuleStatus(int moduleId) const;
     int getModuleCount() const;
@@ -55,6 +58,8 @@ private:
         std::vector<int> channels;
         std::array<uint32_t, 126> histogram;
         SweepMode mode;
+        volatile bool active = true;
+        volatile bool paused = false;
     };
 
     static void runRfTask(void* parameters);

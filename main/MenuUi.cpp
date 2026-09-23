@@ -16,6 +16,8 @@ constexpr gpio_num_t OLED_SCL = GPIO_NUM_20;
 constexpr gpio_num_t BTN_UP_PIN = GPIO_NUM_16;
 constexpr gpio_num_t BTN_DOWN_PIN = GPIO_NUM_17;
 constexpr gpio_num_t BTN_SELECT_PIN = GPIO_NUM_18;
+constexpr uint8_t OLED_ADDRESS_PRIMARY = 0x3C;
+constexpr uint8_t OLED_ADDRESS_ALTERNATE = 0x3D;
 
 std::vector<int> defaultRFSelection(int moduleCount) {
     std::vector<int> ids;
@@ -36,11 +38,16 @@ MenuUi::MenuUi(RfSweeper& sweeper, TaskRegistry* registry, TaskHistory* history)
       mainPage("RF Menu"),
             createTaskPage("Create Task", mainPage),
             runningTasksPage("Current Running Tasks", mainPage),
+            taskControlsPage("Task Controls", runningTasksPage),
+            taskStatusPage("Task Screen", taskControlsPage),
             taskHistoryPage("Task History", mainPage),
             rfModulesPage("RF Modules", createTaskPage),
             moduleStatusPage("RF Status", rfModulesPage),
             createTaskItem("Create Task", createTaskPage),
             runningTasksItem("Current Running Tasks", runningTasksPage),
+            taskPauseItem("Pause Task", toggleTaskPause),
+            taskStopItem("Stop Task", stopSelectedTask),
+            taskViewItem("View Task Screen", showSelectedTaskScreen),
             taskHistoryItem("Task History", taskHistoryPage),
             rfModulesItem("RF Modules", rfModulesPage),
             statusItem("Current Status", showRfStatus),
@@ -69,7 +76,18 @@ void MenuUi::run() {
     ESP_LOGI(TAG, "Arduino initialized. Starting I2C on SDA=%d, SCL=%d.",
              OLED_SDA, OLED_SCL);
     Wire.begin(OLED_SDA, OLED_SCL);
-    display.begin();
+    bool oledDetected = false;
+    for (const uint8_t address : {OLED_ADDRESS_PRIMARY, OLED_ADDRESS_ALTERNATE}) {
+        Wire.beginTransmission(address);
+        if (Wire.endTransmission() == 0) {
+            oledDetected = true;
+            break;
+        }
+    }
+    if (!oledDetected || display.begin() == 0) {
+        ESP_LOGE(TAG, "OLED initialization failed: no responding SSD1306 found.");
+        return;
+    }
     ESP_LOGI(TAG, "OLED initialized.");
 
     gpio_config_t ioConfig = {};
@@ -110,6 +128,9 @@ void MenuUi::initializeMenu() {
 
     buildCreateTaskPage();
     buildRunningTasksPage();
+    taskControlsPage.addMenuItem(taskViewItem);
+    taskControlsPage.addMenuItem(taskPauseItem);
+    taskControlsPage.addMenuItem(taskStopItem);
     buildHistoryPage();
     historyBuilt = true;
 
@@ -204,14 +225,65 @@ void MenuUi::showRunningTaskStatus(GEMCallbackData data) {
         return;
     }
 
-    if (data.valInt < 0 || static_cast<size_t>(data.valInt) >= activeUi->runningTasks.size()) {
+    if (data.valInt < 0 || static_cast<size_t>(data.valInt) >= activeUi->taskRegistry->tasks().size()) {
         return;
     }
 
-    activeUi->selectedTaskForEdit = activeUi->runningTasks[data.valInt];
+    activeUi->selectedTaskForEdit = activeUi->taskRegistry->tasks()[data.valInt];
+    if (activeUi->selectedTaskForEdit == nullptr ||
+        (activeUi->selectedTaskForEdit->status() != TaskStatus::RUNNING &&
+         activeUi->selectedTaskForEdit->status() != TaskStatus::PAUSED)) {
+        return;
+    }
     activeUi->display.clearBuffer();
-    activeUi->pushMenuPage(&activeUi->mainPage);
+    activeUi->taskPauseItem.setTitle(
+        activeUi->selectedTaskForEdit->status() == TaskStatus::PAUSED
+            ? "Resume Task" : "Pause Task");
+    activeUi->pushMenuPage(&activeUi->taskControlsPage);
+}
+
+void MenuUi::showSelectedTaskScreen() {
+    if (activeUi == nullptr || activeUi->selectedTaskForEdit == nullptr) {
+        return;
+    }
+    activeUi->pushMenuPage(&activeUi->taskStatusPage);
     activeUi->drawTaskStatusSection();
+}
+
+void MenuUi::toggleTaskPause() {
+    if (activeUi == nullptr || activeUi->selectedTaskForEdit == nullptr) {
+        return;
+    }
+
+    const bool changed = activeUi->selectedTaskForEdit->status() == TaskStatus::PAUSED
+        ? activeUi->selectedTaskForEdit->resume()
+        : activeUi->selectedTaskForEdit->pause();
+    if (changed) {
+        activeUi->addHistoryEntry(activeUi->selectedTaskForEdit->name(),
+                                  activeUi->selectedTaskForEdit->status(),
+                                  activeUi->selectedTaskForEdit->status() == TaskStatus::PAUSED
+                                      ? "Task paused" : "Task resumed");
+        activeUi->taskPauseItem.setTitle(
+            activeUi->selectedTaskForEdit->status() == TaskStatus::PAUSED
+                ? "Resume Task" : "Pause Task");
+        activeUi->refreshTaskPages();
+        activeUi->menu.drawMenu();
+    }
+}
+
+void MenuUi::stopSelectedTask() {
+    if (activeUi == nullptr || activeUi->selectedTaskForEdit == nullptr) {
+        return;
+    }
+
+    activeUi->selectedTaskForEdit->stop();
+    activeUi->addHistoryEntry(activeUi->selectedTaskForEdit->name(),
+                              TaskStatus::STOPPED, "Task stopped");
+    activeUi->refreshTaskPages();
+    activeUi->selectedTaskForEdit = nullptr;
+    activeUi->menu.setMenuPageCurrent(activeUi->runningTasksPage);
+    activeUi->menuStack.push_back(&activeUi->runningTasksPage);
+    activeUi->menu.drawMenu();
 }
 
 void MenuUi::showRfStatus() {
@@ -280,12 +352,12 @@ void MenuUi::confirmSelectedTask() {
         activeUi->selectedTaskForEdit = nullptr;
         activeUi->selectedModules.assign(activeUi->sweeper.getModuleCount(), false);
         activeUi->updateModuleStatusItems();
+        activeUi->refreshTaskPages();
         activeUi->display.clearBuffer();
         activeUi->menuStack.clear();
         activeUi->menuStack.push_back(&activeUi->mainPage);
         activeUi->menu.setMenuPageCurrent(activeUi->mainPage);
         activeUi->menu.drawMenu();
-        activeUi->buildHistoryPage();
     }
 }
 
@@ -316,15 +388,11 @@ void MenuUi::drawTaskStatusSection() {
         return;
     }
 
-    if (activeUi->menuStack.empty() || activeUi->menuStack.back() != &activeUi->mainPage) {
+    if (activeUi->menuStack.empty() || activeUi->menuStack.back() != &activeUi->taskStatusPage) {
         return;
     }
 
     activeUi->display.clearBuffer();
-    activeUi->display.setDrawColor(1);
-    activeUi->display.drawFrame(0, 48, 128, 16);
-    activeUi->display.setFont(u8g2_font_6x10_tr);
-    activeUi->display.drawStr(2, 58, activeUi->selectedTaskForEdit->name());
     activeUi->selectedTaskForEdit->renderStatus(activeUi->display);
     activeUi->display.sendBuffer();
 }
@@ -377,25 +445,21 @@ void MenuUi::buildCreateTaskPage() {
 }
 
 void MenuUi::buildRunningTasksPage() {
-    runningTaskItems.clear();
-    runningTasks.clear();
-
-    if (taskRegistry != nullptr) {
-        for (const auto& task : taskRegistry->tasks()) {
-            if (task != nullptr && task->status() == TaskStatus::RUNNING) {
-                runningTasks.push_back(task);
-            }
-        }
+    if (taskRegistry == nullptr) {
+        return;
     }
 
-    for (size_t index = 0; index < runningTasks.size(); ++index) {
-        const auto& task = runningTasks[index];
+    for (size_t index = 0; index < taskRegistry->tasks().size(); ++index) {
+        const auto& task = taskRegistry->tasks()[index];
         if (task == nullptr) {
             continue;
         }
 
         runningTaskItems.push_back(std::make_unique<GEMItem>(task->name(), showRunningTaskStatus, static_cast<int>(index)));
         runningTasksPage.addMenuItem(*runningTaskItems.back());
+        if (task->status() != TaskStatus::RUNNING && task->status() != TaskStatus::PAUSED) {
+            runningTaskItems.back()->hide();
+        }
     }
 }
 
@@ -404,25 +468,47 @@ void MenuUi::buildHistoryPage() {
         return;
     }
 
-    historyItems.clear();
-    if (taskHistory != nullptr) {
-        const auto& entries = taskHistory->entries();
-        if (entries.empty()) {
-            historyItems.push_back(std::make_unique<GEMItem>("No task history", []() {}));
-            taskHistoryPage.addMenuItem(*historyItems.back());
-            return;
-        }
+    historyItems.reserve(historyTitles.size());
+    for (size_t index = 0; index < historyTitles.size(); ++index) {
+        snprintf(historyTitles[index].data(), historyTitles[index].size(), "No task history");
+        historyItems.push_back(std::make_unique<GEMItem>(historyTitles[index].data(), []() {}));
+        taskHistoryPage.addMenuItem(*historyItems.back());
+        historyItems.back()->hide();
+    }
+}
 
-        for (size_t index = 0; index < entries.size() && index < 8; ++index) {
+void MenuUi::refreshTaskPages() {
+    if (taskRegistry != nullptr) {
+        size_t itemIndex = 0;
+        for (const auto& task : taskRegistry->tasks()) {
+            if (task == nullptr || itemIndex >= runningTaskItems.size()) {
+                continue;
+            }
+            if (task->status() == TaskStatus::RUNNING || task->status() == TaskStatus::PAUSED) {
+                runningTaskItems[itemIndex]->show();
+            } else {
+                runningTaskItems[itemIndex]->hide();
+            }
+            ++itemIndex;
+        }
+    }
+
+    if (taskHistory == nullptr) {
+        return;
+    }
+    const auto& entries = taskHistory->entries();
+    for (size_t index = 0; index < historyItems.size(); ++index) {
+        if (index < entries.size()) {
             const auto& entry = entries[entries.size() - 1 - index];
-            char title[32];
-            snprintf(title, sizeof(title), "%s %s",
+            snprintf(historyTitles[index].data(), historyTitles[index].size(), "%s %s",
                      entry.taskName.c_str(),
                      entry.status == TaskStatus::RUNNING ? "RUN" :
                      entry.status == TaskStatus::FAILED ? "FAIL" :
                      entry.status == TaskStatus::SUCCEEDED ? "OK" : "IDLE");
-            historyItems.push_back(std::make_unique<GEMItem>(title, []() {}));
-            taskHistoryPage.addMenuItem(*historyItems.back());
+            historyItems[index]->setTitle(historyTitles[index].data());
+            historyItems[index]->show();
+        } else {
+            historyItems[index]->hide();
         }
     }
 }
